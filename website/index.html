@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Ruler Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Roboto:wght@300;400&display=swap" rel="stylesheet">
+    
+    <style>
+        /* --- CSS DESIGN --- */
+        body {
+            background-color: #0f172a; /* Dark Blue/Black Theme */
+            color: #e2e8f0;
+            font-family: 'Roboto', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .dashboard-card {
+            background: #1e293b;
+            width: 100%;
+            max-width: 450px;
+            padding: 40px 30px;
+            border-radius: 20px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            border: 1px solid #334155;
+            position: relative;
+        }
+
+        h2 {
+            margin: 0 0 30px 0;
+            font-weight: 300;
+            letter-spacing: 3px;
+            color: #94a3b8;
+            font-size: 1.1rem;
+            text-transform: uppercase;
+        }
+
+        /* Tampilan Angka Utama */
+        .measurement-box {
+            background: #0f172a;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border: 2px solid #334155;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        .digital-value {
+            font-family: 'Orbitron', monospace; /* Font gaya sci-fi/digital */
+            font-size: 5rem;
+            font-weight: 700;
+            color: #38bdf8; /* Warna Cyan */
+            text-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+            line-height: 1;
+        }
+
+        .unit {
+            font-size: 1.5rem;
+            color: #64748b;
+            margin-top: 5px;
+            display: block;
+        }
+
+        /* Visual Bar (Penggaris) */
+        .ruler-track {
+            width: 100%;
+            height: 30px;
+            background: #334155;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 10px;
+        }
+
+        .ruler-fill {
+            height: 100%;
+            width: 0%; /* Ini berubah via JS */
+            background: linear-gradient(90deg, #38bdf8, #2563eb);
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        /* Garis-garis ukur */
+        .ticks {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: repeating-linear-gradient(90deg, transparent, transparent 19px, rgba(255,255,255,0.1) 20px);
+            z-index: 2;
+        }
+
+        /* Indikator Status */
+        .footer {
+            margin-top: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            color: #64748b;
+            border-top: 1px solid #334155;
+            padding-top: 20px;
+        }
+
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.75rem;
+            background: #331e1e;
+            color: #f87171;
+            transition: all 0.3s;
+        }
+
+        .status-badge.connected {
+            background: #1e3328;
+            color: #4ade80;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.2);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-card">
+        <h2>Digital Ruler</h2>
+        
+        <div class="measurement-box">
+            <div id="display-val" class="digital-value">0.0</div>
+            <span class="unit">Centimeters</span>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; color:#64748b; font-size:0.8rem; margin-bottom:5px;">
+            <span>0 cm</span>
+            <span>30 cm</span>
+        </div>
+        <div class="ruler-track">
+            <div class="ticks"></div>
+            <div id="ruler-bar" class="ruler-fill"></div>
+        </div>
+
+        <div class="footer">
+            <span id="last-update">Waiting for data...</span>
+            <span id="status-indicator" class="status-badge">DISCONNECTED</span>
+        </div>
+    </div>
+
+    <script>
+        // --- KONFIGURASI ---
+        const broker = "broker.hivemq.com";
+        const port = 8884;
+        
+
+        // Topik MQTT dari ESP32 (ganti disini yaa)
+        const topic_target = "esp32/workshop/ftek/namatopic"; 
+
+        const client = new Paho.MQTT.Client(broker, port, "web_ruler_" + new Date().getTime());
+
+    
+        client.onMessageArrived = (message) => {
+            console.log("Data Masuk: " + message.payloadString);
+            
+            let distance = parseFloat(message.payloadString);
+
+            if (!isNaN(distance)) {
+                updateUI(distance);
+            }
+        };
+
+        function updateUI(dist) {
+            
+            document.getElementById("display-val").innerText = dist.toFixed(1);
+
+            // 2. Update Panjang Bar
+            // Asumsi penggaris maksimal 30cm (100% width)
+            let percent = (dist / 30) * 100;
+            if (percent > 100) percent = 100; // Mentok di 100%
+            if (percent < 0) percent = 0;
+
+            const bar = document.getElementById("ruler-bar");
+            bar.style.width = percent + "%";
+
+            // 3. Ubah Warna Bar jika Jarak Dekat (< 5 cm)
+            if (dist < 5) {
+                bar.style.background = "linear-gradient(90deg, #ef4444, #f87171)"; // Merah
+            } else {
+                bar.style.background = "linear-gradient(90deg, #38bdf8, #2563eb)"; // Biru Normal
+            }
+
+            // 4. Update Waktu
+            const now = new Date();
+            document.getElementById("last-update").innerText = "Update: " + now.toLocaleTimeString();
+        }
+
+        // --- KONEKSI ---
+        client.onConnectionLost = (response) => {
+            const badge = document.getElementById("status-indicator");
+            badge.innerText = "DISCONNECTED";
+            badge.classList.remove("connected");
+        };
+
+        const options = {
+            timeout: 3,
+            useSSL: true, // Wajib untuk port 8884
+            onSuccess: () => {
+                const badge = document.getElementById("status-indicator");
+                badge.innerText = "CONNECTED";
+                badge.classList.add("connected");
+                
+                // Subscribe ke topik ESP32
+                client.subscribe(topic_target);
+                console.log("Subscribe ke: " + topic_target);
+            },
+            onFailure: (err) => {
+                console.log("Gagal Konek: " + err.errorMessage);
+            }
+        };
+
+        // Mulai Koneksi
+        client.connect(options);
+    </script>
+</body>
+</html>
